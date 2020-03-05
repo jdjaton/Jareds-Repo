@@ -1,0 +1,54 @@
+Install-Module AzureRM -Force -AllowClobber
+Import-Module AzureRM
+Get-Module AzureRM
+Login-AzureRmAccount
+
+#Variables
+
+##Gloabl
+$ResourceGroupName = "JakeAD"
+$Location = "CentralUS"
+
+##Storage
+$StorageName = "jakeadstorage"
+$StorageSkuName = "Standard_GRS"
+
+##Network
+$InterfaceName = "JakeADvnic"
+$Subnet1Name = "JakeADsubnet"
+$VNetName = "JakeADvnet"
+$VNetAddressPrefix = "10.0.0.0/8"
+$VNetSubnetAddressPrefix = "10.10.0.0/24"
+
+##Compute
+$VMName = "JakeADvm001"
+$ComputerName = "JakeADvm001"
+$VMSize = "Standard_A2"
+$OSDiskName = $VMName + "OSDisk"
+
+#BuildVMInfrastructure
+New-AzureRmResourceGroup -Name $ResourceGroupName -Location $Location
+$StorageAccount = New-AzureRmStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageName -SkuName $StorageSkuName -Location $Location
+$PublicIP = New-AzureRmPublicIpAddress -Name "JakeADPublicIP" -ResourceGroupName $ResourceGroupName -Location $Location -AllocationMethod Static
+$SubNetConfig = New-AzureRmVirtualNetworkSubnetConfig -Name $Subnet1Name -AddressPrefix $VNetSubnetAddressPrefix
+$VNet = New-AzureRmVirtualNetwork -Name $VNetName -ResourceGroupName $ResourceGroupName -Location $Location -AddressPrefix $VNetAddressPrefix -Subnet $SubNetConfig
+$Interface = New-AzureRmNetworkInterface -Name $InterfaceName -ResourceGroupName $ResourceGroupName -Location $Location -SubnetId $VNet.Subnets[0].Id -PublicIpAddressId $PublicIP.Id
+
+#BuildVM
+$Credential = Get-Credential
+$VirtualMachine = New-AzureRmVMConfig -VMName $VMName -VMSize $VMSize
+$VirtualMachine = Set-AzureRmVMOperatingSystem -VM $VirtualMachine -Windows -ComputerName $ComputerName -Credential $Credential -ProvisionVMAgent -EnableAutoUpdate
+$VirtualMachine = Set-AzureRmVMSourceImage -VM $VirtualMachine -PublisherName MicrosoftWindowsServer -Offer WindowsServer -Skus 2016-Datacenter -Version "latest"
+$VirtualMachine = Add-AzureRmVMNetworkInterface -VM $VirtualMachine -Id $Interface.Id
+$OSDiskUri = $StorageAccount.PrimaryEndpoints.Blob.ToString() + "vhds/" + $OSDiskName + ".vhd"
+$VirtualMachine = Set-AzureRmVMOSDisk -VM $VirtualMachine -Name $OSDiskName -VhdUri $OSDiskUri -CreateOption FromImage
+
+#LaunchVM
+New-AzureRmVM -ResourceGroupName $ResourceGroupName -Location $Location -VM $VirtualMachine
+
+#RDP
+$RDPIP = Get-AzureRmPublicIpAddress -ResourceGroupName $ResourceGroupName -Name "JakeADPublicIP"
+Start-Process "mstsc" -ArgumentList "/V:52.165.180.105"
+
+#StopVM
+Stop-AzureRmVM -Name $VMName -ResourceGroupName $ResourceGroupName -Force
